@@ -97,16 +97,9 @@ async def send_command(box_ip: str, inst_code: str, cmd: dict, timeout: float = 
     """Invia un comando cifrato su :400. True se la box lo accetta (ACK o esecuzione).
     Solleva su errore di connessione (→ il chiamante fa fallback cloud).
 
-    Due regimi, verificati sul campo (2026-08-02/03):
-    - ignore_ack=True (RAFFICA, corsa continua): scrivi il frame e chiudi SUBITO,
-      NIENTE read. Su box sana la chiusura è ~10ms → i frame a 0,3s si concatenano
-      e il motore fa la corsa fluida (uomo-presente, come il telecomando tenuto).
-      Aspettare l'ack qui dilata il treno oltre il deadman del motore (~1,5s) → jog
-      separati. NB: se la box è DEGRADATA chiude lenta (~1s) → la raffica torna a
-      spezzarsi in jog: sintomo che serve power-cycle+riposo, non una modifica codice.
-    - ignore_ack=False (AZIONE SINGOLA: jog fine, luci, GET_FEEDBACK): attendi l'ACK
-      pieno (la box lo manda a elaborazione conclusa, ~1,9s). Chiudere prima qui
-      scarta il frame e, ripetuto, impianta il :400."""
+    NB: la box gestisce UN comando alla volta (una sessione Direct Mode :400). Se è
+    occupata (radio in corso, o l'app la sta usando) risponde `DENY\\r\\n` → contesa,
+    non guasto: va riprovato. Per i jog contati usare send_command_status()."""
     payload = _encrypt(_convert_for_dm(inst_code, cmd))
     reader, writer = await asyncio.wait_for(
         asyncio.open_connection(box_ip, CMD_PORT), timeout=timeout)
@@ -120,6 +113,37 @@ async def send_command(box_ip: str, inst_code: str, cmd: dict, timeout: float = 
         except asyncio.TimeoutError:
             resp = b""            # no-ACK entro il timeout = chiudiamo comunque
         return b"ACK" in resp or resp == b""
+    finally:
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+
+async def send_command_status(box_ip: str, inst_code: str, cmd: dict,
+                              timeout: float = 6.0) -> str:
+    """Come send_command ma ritorna lo STATO per i jog contati:
+      'ack'  = la box ha eseguito (ACK ricevuto)
+      'deny' = box occupata (contesa/radio in corso) → il chiamante deve RIPROVARE
+      'noack'= inviato ma nessuna risposta entro il timeout (probabile eseguito,
+               come l'app che tratta il timeout come 'Action Completed')
+    Solleva su errore di connessione (→ fallback cloud)."""
+    payload = _encrypt(_convert_for_dm(inst_code, cmd))
+    reader, writer = await asyncio.wait_for(
+        asyncio.open_connection(box_ip, CMD_PORT), timeout=timeout)
+    try:
+        writer.write(payload)
+        await writer.drain()
+        try:
+            resp = await asyncio.wait_for(reader.read(64), timeout=timeout)
+        except asyncio.TimeoutError:
+            resp = b""
+        if b"ACK" in resp:
+            return "ack"
+        if b"DENY" in resp:
+            return "deny"
+        return "noack"
     finally:
         writer.close()
         try:

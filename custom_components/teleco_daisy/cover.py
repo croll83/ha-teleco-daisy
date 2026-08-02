@@ -10,6 +10,7 @@ from homeassistant.components.cover import (
     CoverEntityFeature,
 )
 import asyncio
+import logging
 
 import voluptuous as vol
 
@@ -28,6 +29,8 @@ from .lib import (
     DaisyShadeCover,
     DaisySlatsCover,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -138,16 +141,55 @@ class TelecoDaisyCover(CoordinatorEntity, CoverEntity):
     #
 
     async def async_slats_jog(self, direction: str, count: int = 1,
-                              spacing: float = 0.4) -> None:
-        """Frame contati (~6°/frame sui model 31): il motore è quantizzato a
-        frame, quindi N frame = N×6° deterministici. Serializzato col lock
-        raffiche per non interleavare i treni di due motori."""
+                              spacing: float = 1.0) -> None:
+        """`count` jog LOCALI affidabili (~5°/jog sui model 31), con la disciplina
+        dell'app: ACK-wait per ogni jog + settle prima del successivo (la box fa
+        un comando alla volta; connettersi mentre trasmette la radio dà DENY).
+
+        Robustezza:
+        - 'deny' (box occupata: contesa con app o radio in corso) → backoff e
+          RIPROVA lo stesso jog (non lo conta), fino a max_deny tentativi.
+        - pausa di drain ogni `group` jog (la box va in DENY dopo ~20 frame di
+          fila; stiamo sotto con margine).
+        - 'cloud' (nessuna box in LAN) → esce: le corse fluide vanno sul cloud,
+          non ha senso fare jog cloud uno a uno.
+        Serializzato col _burst_lock per non interleavare due motori."""
         from .lib import _burst_lock
+        cover = self._cover
+        cmd = {
+            "deviceCode": str(cover.deviceIndex),
+            "idInstallationDevice": cover.idInstallationDevice,
+            "commandAction": "OPEN_STOP_CLOSE",
+        } | cover.osc_map[direction]
+
+        group = 15          # pausa di drain ogni 15 jog (soglia box ~20)
+        drain = 6.0
+        max_deny = 5        # tentativi max consecutivi su DENY prima di arrendersi
         async with _burst_lock:
-            for i in range(count):
-                if i:
-                    await asyncio.sleep(spacing)
-                await self._cover.jog(direction)
+            done = 0
+            deny_streak = 0
+            while done < count:
+                status = await cover.client.local_jog(cover.installation, cmd)
+                if status in ("ack", "noack"):
+                    done += 1
+                    deny_streak = 0
+                    if done < count:
+                        await asyncio.sleep(spacing)   # settle: radio finita
+                        if done % group == 0:
+                            await asyncio.sleep(drain)  # drain sotto la soglia box
+                elif status == "deny":
+                    deny_streak += 1
+                    if deny_streak > max_deny:
+                        _LOGGER.warning(
+                            "slats_jog: DENY persistente dopo %d jog su %d "
+                            "(box occupata) — mi fermo", done, count)
+                        return
+                    await asyncio.sleep(2.0 * deny_streak)  # backoff crescente
+                else:  # 'cloud': niente box in LAN
+                    _LOGGER.warning(
+                        "slats_jog: box non in LAN — jog locali non disponibili "
+                        "(fatti %d su %d)", done, count)
+                    return
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         await self._cover.open_cover()

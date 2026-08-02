@@ -647,6 +647,23 @@ class TelecoDaisy:
         except Exception as e:  # noqa: BLE001
             _LOGGER.debug("daisy_local: refresh_feedback fallito: %s", e)
 
+    async def local_jog(self, installation, cmd: dict) -> str:
+        """Un singolo jog LOCALE su :400 con ACK-wait. Ritorna:
+          'ack'|'deny'|'noack' (vedi daisy_local.send_command_status), oppure
+          'cloud' se non c'è la box in LAN (cache IP vuota) → il chiamante decide.
+        La box fa un comando alla volta: 'deny' = occupata, va riprovato."""
+        box_ip = self._cached_box_ip()
+        if not box_ip:
+            return "cloud"
+        async with self._local_lock:
+            try:
+                return await daisy_local.send_command_status(
+                    box_ip, installation.instCode, cmd)
+            except Exception as e:  # noqa: BLE001
+                _LOGGER.warning("daisy_local: jog locale fallito (%s)", e)
+                self._box_ip = None  # forza ri-discovery
+                return "cloud"
+
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
