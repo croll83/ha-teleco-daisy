@@ -21,3 +21,27 @@ slats_jog:
       default: 1
       selector:
         number: {min: 0.3, max: 10, step: 0.1}
+
+slats_run_cloud:
+  name: Lamelle - corsa fluida (cloud)
+  description: Corsa continua via cloud (6°/frame), a gruppi + pausa per non crashare la box. Per il controllo manuale.
+  target:
+    entity:
+      domain: cover
+  fields:
+    direction:
+      name: Direzione
+      required: true
+      selector:
+        select:
+          options: ["open", "close"]
+    count:
+      name: Numero frame
+      default: 1
+      selector:
+        number: {min: 1, max: 40}
+    group:
+      name: Frame per gruppo (poi pausa)
+      default: 7
+      selector:
+        number: {min: 1, max: 10}

@@ -664,6 +664,44 @@ class TelecoDaisy:
                 self._box_ip = None  # forza ri-discovery
                 return "cloud"
 
+    async def cloud_slats_run(self, installation, cmd: dict, count: int,
+                              group: int = 7, group_pause: float = 6.0,
+                              frame_gap: float = 0.35) -> int:
+        """Corsa 'fluida' via CLOUD (6°/frame): la box accoda i frame e li scarica
+        via radio ravvicinati → il motore concatena (corsa continua vera). Manda
+        `count` frame in GRUPPI da `group` con pausa, e controlla `nodeActive`
+        prima di ogni gruppo. NB: run lunghi non spezzati (es. 25 close + 23 open
+        di fila) mandano in crash la box o bannano l'account → i gruppi + pausa lo
+        evitano. Ritorna quanti frame sono stati mandati."""
+        sent = 0
+        while sent < count:
+            try:
+                if not await self.get_installation_is_active(installation):
+                    _LOGGER.warning(
+                        "cloud_slats_run: box nodeActive=False, stop a %d/%d",
+                        sent, count)
+                    return sent
+            except Exception as e:  # noqa: BLE001
+                _LOGGER.warning(
+                    "cloud_slats_run: nodestatus fallito (%s), proseguo cauto", e)
+            n = min(group, count - sent)
+            for _ in range(n):
+                res = await self._tmate20_post(
+                    "teleco/services/tmate20/feedthecommands/",
+                    json={"commandsList": [cmd],
+                          "idInstallation": installation.instCode,
+                          "idScenario": 0, "isScenario": False})
+                if res.get("MessageID") != "WS-000":
+                    _LOGGER.warning(
+                        "cloud_slats_run: risposta %s a %d/%d, stop",
+                        res.get("MessageID"), sent, count)
+                    return sent
+                sent += 1
+                await asyncio.sleep(frame_gap)
+            if sent < count:
+                await asyncio.sleep(group_pause)
+        return sent
+
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()

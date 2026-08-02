@@ -61,6 +61,17 @@ async def async_setup_entry(
         },
         "async_slats_jog",
     )
+    # corsa "fluida" via CLOUD (6°/frame): la box accoda e concatena → corsa vera.
+    # A gruppi + pausa per non crashare/bannare. Per il manuale (dashboard).
+    platform.async_register_entity_service(
+        "slats_run_cloud",
+        {
+            vol.Required("direction"): vol.In(["open", "close"]),
+            vol.Optional("count", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=40)),
+            vol.Optional("group", default=7): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
+        },
+        "async_slats_run_cloud",
+    )
 
 
 class TelecoDaisyCover(CoordinatorEntity, CoverEntity):
@@ -190,6 +201,24 @@ class TelecoDaisyCover(CoordinatorEntity, CoverEntity):
                         "slats_jog: box non in LAN — jog locali non disponibili "
                         "(fatti %d su %d)", done, count)
                     return
+
+    async def async_slats_run_cloud(self, direction: str, count: int = 1,
+                                    group: int = 7) -> None:
+        """Corsa fluida via CLOUD (6°/frame), a gruppi da `group` + pausa +
+        check nodeActive. Per il controllo manuale (dashboard); NON dipende dal
+        Direct Mode locale, ma dipende dal cloud su."""
+        from .lib import _burst_lock
+        cover = self._cover
+        cmd = {
+            "deviceCode": str(cover.deviceIndex),
+            "idInstallationDevice": cover.idInstallationDevice,
+            "commandAction": "OPEN_STOP_CLOSE",
+        } | cover.osc_map[direction]
+        async with _burst_lock:
+            sent = await cover.client.cloud_slats_run(
+                cover.installation, cmd, count, group=group)
+        if sent < count:
+            _LOGGER.warning("slats_run_cloud: inviati %d/%d frame", sent, count)
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         await self._cover.open_cover()
