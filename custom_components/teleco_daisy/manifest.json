@@ -13,5 +13,5 @@
   "integration_type": "hub",
   "issue_tracker": "https://github.com/croll83/ha-teleco-daisy/issues",
   "requirements": [],
-  "version": "0.3.1"
+  "version": "0.3.2"
 }

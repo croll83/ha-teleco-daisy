@@ -95,19 +95,26 @@ async def discover_box_ip(inst_code: str, timeout: float = 6.0) -> str | None:
 async def send_command(box_ip: str, inst_code: str, cmd: dict, timeout: float = 6.0,
                        ignore_ack: bool = False) -> bool:
     """Invia un comando cifrato su :400. True se la box lo accetta (ACK o esecuzione).
-    Solleva su errore di connessione (→ il chiamante fa fallback cloud)."""
+    Solleva su errore di connessione (→ il chiamante fa fallback cloud).
+
+    Due regimi, verificati sul campo (2026-08-02/03):
+    - ignore_ack=True (RAFFICA, corsa continua): scrivi il frame e chiudi SUBITO,
+      NIENTE read. Su box sana la chiusura è ~10ms → i frame a 0,3s si concatenano
+      e il motore fa la corsa fluida (uomo-presente, come il telecomando tenuto).
+      Aspettare l'ack qui dilata il treno oltre il deadman del motore (~1,5s) → jog
+      separati. NB: se la box è DEGRADATA chiude lenta (~1s) → la raffica torna a
+      spezzarsi in jog: sintomo che serve power-cycle+riposo, non una modifica codice.
+    - ignore_ack=False (AZIONE SINGOLA: jog fine, luci, GET_FEEDBACK): attendi l'ACK
+      pieno (la box lo manda a elaborazione conclusa, ~1,9s). Chiudere prima qui
+      scarta il frame e, ripetuto, impianta il :400."""
     payload = _encrypt(_convert_for_dm(inst_code, cmd))
     reader, writer = await asyncio.wait_for(
         asyncio.open_connection(box_ip, CMD_PORT), timeout=timeout)
     try:
         writer.write(payload)
         await writer.drain()
-        # NB: la box processa un comando radio in ~2-3s e risponde "ACK\r\n" a
-        # elaborazione conclusa. Chiuderle la connessione mentre sta processando
-        # (FIN precoce) non solo fa scartare il frame: dopo 1-2 volte il server
-        # :400 si impianta del tutto (SYN senza risposta, verificato 2026-08-02).
-        # Quindi si aspetta SEMPRE l'ACK pieno; ignore_ack significa solo che un
-        # eventuale no-ACK entro il timeout non è considerato errore.
+        if ignore_ack:
+            return True           # raffica: non leggere, chiudi subito (vedi sopra)
         try:
             resp = await asyncio.wait_for(reader.read(64), timeout=timeout)
         except asyncio.TimeoutError:
