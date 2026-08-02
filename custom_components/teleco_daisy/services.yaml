@@ -15,9 +15,9 @@ slats_jog:
       name: Numero passi
       default: 1
       selector:
-        number: {min: 1, max: 12}
+        number: {min: 1, max: 40}
     spacing:
       name: Secondi tra i passi
-      default: 4
+      default: 1
       selector:
-        number: {min: 2, max: 10, step: 0.5}
+        number: {min: 0.3, max: 10, step: 0.1}

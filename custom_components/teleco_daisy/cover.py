@@ -53,7 +53,7 @@ async def async_setup_entry(
         "slats_jog",
         {
             vol.Required("direction"): vol.In(["open", "close"]),
-            vol.Optional("count", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
+            vol.Optional("count", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=40)),
             vol.Optional("spacing", default=0.4): vol.All(vol.Coerce(float), vol.Range(min=0.3, max=10.0)),
         },
         "async_slats_jog",

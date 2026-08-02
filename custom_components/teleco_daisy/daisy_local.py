@@ -95,8 +95,6 @@ async def discover_box_ip(inst_code: str, timeout: float = 6.0) -> str | None:
 async def send_command(box_ip: str, inst_code: str, cmd: dict, timeout: float = 6.0,
                        ignore_ack: bool = False) -> bool:
     """Invia un comando cifrato su :400. True se la box lo accetta (ACK o esecuzione).
-    Con ignore_ack=True NON attende l'ACK (per i treni di raffica: aspettare l'ack
-    di ogni frame dilaterebbe la corsa oltre la finestra di 'pressione lunga').
     Solleva su errore di connessione (→ il chiamante fa fallback cloud)."""
     payload = _encrypt(_convert_for_dm(inst_code, cmd))
     reader, writer = await asyncio.wait_for(
@@ -104,12 +102,16 @@ async def send_command(box_ip: str, inst_code: str, cmd: dict, timeout: float = 
     try:
         writer.write(payload)
         await writer.drain()
-        if ignore_ack:
-            return True           # non attendere l'ack: raffica fluida
+        # NB: la box processa un comando radio in ~2-3s e risponde "ACK\r\n" a
+        # elaborazione conclusa. Chiuderle la connessione mentre sta processando
+        # (FIN precoce) non solo fa scartare il frame: dopo 1-2 volte il server
+        # :400 si impianta del tutto (SYN senza risposta, verificato 2026-08-02).
+        # Quindi si aspetta SEMPRE l'ACK pieno; ignore_ack significa solo che un
+        # eventuale no-ACK entro il timeout non è considerato errore.
         try:
             resp = await asyncio.wait_for(reader.read(64), timeout=timeout)
         except asyncio.TimeoutError:
-            resp = b""            # no-ACK = eseguito comunque (come l'app)
+            resp = b""            # no-ACK entro il timeout = chiudiamo comunque
         return b"ACK" in resp or resp == b""
     finally:
         writer.close()

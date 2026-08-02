@@ -1,13 +1,17 @@
 {
   "domain": "teleco_daisy",
   "name": "Teleco Daisy",
-  "codeowners": ["@croll83"],
+  "codeowners": [
+    "@croll83"
+  ],
   "config_flow": true,
-  "dependencies": ["http"],
+  "dependencies": [
+    "http"
+  ],
   "documentation": "https://github.com/croll83/ha-teleco-daisy",
   "iot_class": "cloud_polling",
   "integration_type": "hub",
   "issue_tracker": "https://github.com/croll83/ha-teleco-daisy/issues",
   "requirements": [],
-  "version": "0.3.0"
+  "version": "0.3.1"
 }
