@@ -1,0 +1,21 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Teleco Daisy configuration",
+                "description": "Sign in with your Teleco Daisy app account. The email is case-insensitive.",
+                "data": {
+                    "username": "Email address",
+                    "password": "Password"
+                }
+            }
+        },
+        "error": {
+            "invalid_auth": "Login failed: wrong email or password.",
+            "no_installations": "No DaisyBox installation found on this account."
+        },
+        "abort": {
+            "already_configured": "This DaisyBox is already configured."
+        }
+    }
+}
