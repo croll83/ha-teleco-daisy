@@ -95,15 +95,41 @@ class TelecoDaisyLight(CoordinatorEntity, LightEntity):
         return None
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._light.turn_off()
-        await self._update_state()
+        # Stato OTTIMISTICO + invio in BACKGROUND. La DaisyBox serializza sul canale
+        # locale (~2-4s/comando, ACK-wait + GET_FEEDBACK): un bulk — es. lo scenario
+        # "buonanotte" spegne tutte e 5 le luci — bloccherebbe la service-call di HA
+        # oltre il timeout (~10s) → HA/Jarvis riportano errore anche se poi si spengono
+        # una a una. Aggiorniamo subito lo stato e mandiamo il comando dietro: la
+        # service-call torna all'istante (no timeout), la box drena la coda serializzata
+        # dal _local_lock del client.
+        self._light.is_on = False
+        self.async_write_ha_state()
+        self.hass.async_create_task(self._send_and_refresh(self._light.turn_off()))
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        self._light.is_on = True
+        if not isinstance(self._light, DaisyRGBLight) and (b := kwargs.get(ATTR_BRIGHTNESS)) is not None:
+            self._light.brightness = int(brightness_to_value(BRIGHTNESS_SCALE, int(b)))
+        self.async_write_ha_state()
         if isinstance(self._light, DaisyRGBLight):
-            await self._turn_on_rgb(**kwargs)
+            coro = self._turn_on_rgb(**kwargs)
         else:
-            await self._turn_on_white(**kwargs)
-        await self._update_state()
+            coro = self._turn_on_white(**kwargs)
+        self.hass.async_create_task(self._send_and_refresh(coro))
+
+    async def _send_and_refresh(self, coro) -> None:
+        """Esegue il comando reale (send ACK-wait + GET_FEEDBACK) e poi rinfresca lo
+        stato vero, in background così la service-call HA non blocca sul canale seriale
+        della box. Su errore l'update_state corregge lo stato ottimistico."""
+        try:
+            await coro
+        except Exception as e:  # noqa: BLE001
+            _LOGGER.warning("teleco_daisy light: comando fallito: %s", e)
+        finally:
+            try:
+                await self._update_state()
+            except Exception as e:  # noqa: BLE001
+                _LOGGER.debug("teleco_daisy light: update_state post-comando fallito: %s", e)
 
     async def _turn_on_rgb(self, **kwargs: Any) -> None:
         if new_rgb := kwargs.get(ATTR_RGB_COLOR):
