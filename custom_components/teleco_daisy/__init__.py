@@ -3,6 +3,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 
 from .const import DOMAIN
 from .hub import TelecoDaisyHub
@@ -34,3 +35,21 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Permette di eliminare dalla UI i dispositivi che la DaisyBox non ha più.
+
+    Ogni cambio di tipo o rimozione nell'app Daisy ricrea il dispositivo con un nuovo
+    idInstallationDevice: quello vecchio resta nel registry senza entità. Si può
+    eliminare solo se non è più nella configurazione della box.
+    """
+    hub = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if hub is None:
+        return False
+    attivi = {str(d.idInstallationDevice) for d in hub.devices}
+    return not any(
+        dom == DOMAIN and ident in attivi for dom, ident in device_entry.identifiers
+    )
